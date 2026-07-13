@@ -15,16 +15,6 @@ const allowedOrigins = [
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
-const io = new Server(httpServer, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST']
-  }
-});
-
-// ── Make io accessible in all routes/controllers ────────────────────────────
-app.set('io', io);
-
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -35,6 +25,16 @@ app.use(cors({
   },
   credentials: true
 }));
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST']
+  }
+});
+
+// ── Make io accessible in all routes/controllers ────────────────────────────
+app.set('io', io);
 app.use(express.json());
 
 app.get('/', (req, res) => {
