@@ -1,0 +1,1 @@
+export const useProjects = () => ({ projects: [], loading: false });
