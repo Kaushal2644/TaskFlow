@@ -12,7 +12,7 @@ const httpServer = http.createServer(app);
 
 const allowedOrigins = [
   'http://localhost:5173',
-  'https://task-flow-five-mu.vercel.app/',
+  'https://task-flow-five-mu.vercel.app',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
