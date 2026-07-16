@@ -182,30 +182,60 @@ const KanbanColumn = ({
   );
 };
 
-// ── Quick Add Task Modal ──────────────────────────────────────────────────────
 const QuickAddModal = ({ isOpen, onClose, onSave, defaultStatus, projects }) => {
-  const [form,    setForm]    = useState({ title: '', project: '', priority: 'Medium' });
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
+  const { user } = useAuth();
+
+  const [form,    setForm]    = useState({
+    title: '', project: '', priority: 'Medium', assignedTo: ''
+  });
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState('');
+  const [members,  setMembers]  = useState([]);
+  const [membersLoading, setMembersLoading] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      setForm({ title: '', project: projects[0]?._id || '', priority: 'Medium' });
+      const defaultProject = projects[0]?._id || '';
+      setForm({
+        title:      '',
+        project:    defaultProject,
+        priority:   'Medium',
+        assignedTo: user?._id || ''
+      });
       setError('');
+      if (defaultProject) fetchMembers(defaultProject);
     }
   }, [isOpen, projects]);
+
+  useEffect(() => {
+    if (form.project) fetchMembers(form.project);
+    else setMembers([]);
+  }, [form.project]);
+
+  const fetchMembers = async (projectId) => {
+    setMembersLoading(true);
+    try {
+      const res = await API.get(`/projects/${projectId}`);
+      setMembers(res.data.project.members.map(m => m.user));
+    } catch {
+      setMembers([]);
+    } finally {
+      setMembersLoading(false);
+    }
+  };
 
   if (!isOpen) return null;
 
   const handleSubmit = async () => {
-    if (!form.title.trim()) { setError('Title is required'); return; }
-    if (!form.project)      { setError('Please select a project'); return; }
+    if (!form.title.trim()) { setError('Title is required');          return; }
+    if (!form.project)      { setError('Please select a project');    return; }
 
     setLoading(true);
     try {
       const res = await API.post('/tasks', {
         ...form,
-        status: defaultStatus
+        status:     defaultStatus,
+        assignedTo: form.assignedTo || null
       });
       onSave(res.data.task);
       toast.success('Task added!');
@@ -217,10 +247,16 @@ const QuickAddModal = ({ isOpen, onClose, onSave, defaultStatus, projects }) => 
     }
   };
 
+  const getInitials = (name = '') =>
+    name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box max-w-sm" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-5 border-b border-dark-border">
+
+        {/* Header */}
+        <div className="flex items-center justify-between p-5
+                        border-b border-dark-border">
           <h2 className="text-base font-bold text-text-primary">
             Add to {defaultStatus}
           </h2>
@@ -232,48 +268,123 @@ const QuickAddModal = ({ isOpen, onClose, onSave, defaultStatus, projects }) => 
             <X className="w-4 h-4" />
           </button>
         </div>
+
         <div className="p-5 space-y-3">
+
+          {/* Title */}
+          <input
+            autoFocus
+            type="text"
+            value={form.title}
+            onChange={e => {
+              setForm(p => ({ ...p, title: e.target.value }));
+              setError('');
+            }}
+            placeholder="Task title..."
+            className={`input ${error && !form.title ? 'border-red-500' : ''}`}
+          />
+
+          {/* Project */}
+          <select
+            value={form.project}
+            onChange={e => {
+              setForm(p => ({ ...p, project: e.target.value, assignedTo: '' }));
+              setError('');
+            }}
+            className={`select ${error && !form.project ? 'border-red-500' : ''}`}
+          >
+            <option value="">Select project...</option>
+            {projects.map(p => (
+              <option key={p._id} value={p._id}>{p.name}</option>
+            ))}
+          </select>
+
+          {/* Priority */}
+          <select
+            value={form.priority}
+            onChange={e => setForm(p => ({ ...p, priority: e.target.value }))}
+            className="select"
+          >
+            {['Low','Medium','High','Critical'].map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+
+          {/* ── Assign To ──────────────────────────────────────────────── */}
           <div>
-            <input
-              autoFocus
-              type="text"
-              value={form.title}
-              onChange={e => { setForm(p => ({ ...p, title: e.target.value })); setError(''); }}
-              placeholder="Task title..."
-              className={`input ${error && !form.title ? 'border-red-500' : ''}`}
-            />
+            <label className="block text-xs font-medium
+                               text-text-muted mb-2">
+              ASSIGN TO
+            </label>
+
+            {!form.project ? (
+              <p className="text-text-muted text-xs">
+                Select a project to see members
+              </p>
+            ) : membersLoading ? (
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 border-2 border-primary
+                                border-t-transparent rounded-full animate-spin" />
+                <span className="text-text-muted text-xs">Loading...</span>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {/* Unassigned */}
+                <button
+                  onClick={() => setForm(p => ({ ...p, assignedTo: '' }))}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5
+                              rounded-lg text-xs border transition-all
+                              ${!form.assignedTo
+                                ? 'border-primary bg-primary bg-opacity-20 text-primary'
+                                : 'border-dark-border text-text-secondary hover:border-primary hover:border-opacity-40'
+                              }`}
+                >
+                  <User className="w-3 h-3" />
+                  Unassigned
+                </button>
+
+                {/* Members as pill buttons */}
+                {members.map(member => (
+                  <button
+                    key={member._id}
+                    onClick={() => setForm(p => ({
+                      ...p,
+                      assignedTo: member._id
+                    }))}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5
+                                rounded-lg text-xs border transition-all
+                                ${form.assignedTo === member._id
+                                  ? 'border-primary bg-primary bg-opacity-20 text-primary'
+                                  : 'border-dark-border text-text-secondary hover:border-primary hover:border-opacity-40'
+                                }`}
+                    title={member.email}
+                  >
+                    <div className="w-4 h-4 bg-primary rounded-full
+                                    flex items-center justify-center
+                                    text-white text-xs font-bold">
+                      {getInitials(member.name)}
+                    </div>
+                    {member.name.split(' ')[0]}
+                    {member._id === user?._id && ' (You)'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <div>
-            <select
-              value={form.project}
-              onChange={e => { setForm(p => ({ ...p, project: e.target.value })); setError(''); }}
-              className={`select ${error && !form.project ? 'border-red-500' : ''}`}
-            >
-              <option value="">Select project...</option>
-              {projects.map(p => (
-                <option key={p._id} value={p._id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <select
-              value={form.priority}
-              onChange={e => setForm(p => ({ ...p, priority: e.target.value }))}
-              className="select"
-            >
-              {['Low','Medium','High','Critical'].map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </div>
+
           {error && (
             <p className="text-red-400 text-xs flex items-center gap-1">
               <AlertCircle className="w-3 h-3" />{error}
             </p>
           )}
         </div>
+
+        {/* Footer */}
         <div className="flex gap-3 p-5 border-t border-dark-border">
-          <button onClick={onClose} className="btn-secondary flex-1 justify-center">
+          <button
+            onClick={onClose}
+            className="btn-secondary flex-1 justify-center"
+          >
             Cancel
           </button>
           <button

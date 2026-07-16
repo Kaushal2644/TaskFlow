@@ -3,7 +3,7 @@ import {
   Search, Filter, CheckSquare, Calendar,
   Flag, FolderOpen, Clock, CheckCircle,
   Circle, AlertCircle, X, Edit2, Trash2,
-  Plus, ChevronDown
+  Plus, ChevronDown, User
 } from 'lucide-react';
 import API   from '../api/axios';
 import toast from 'react-hot-toast';
@@ -147,17 +147,46 @@ const TaskRow = ({ task, onEdit, onDelete, onStatusChange }) => {
 
 // ── Task Modal (Create / Edit) ────────────────────────────────────────────────
 const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
-  const isEdit = !!editTask;
+  const { user }  = useAuth();
+  const isEdit    = !!editTask;
 
   const defaultForm = {
-    title: '', description: '',
-    status: 'Todo', priority: 'Medium',
-    project: '', dueDate: ''
+    title:       '',
+    description: '',
+    status:      'Todo',
+    priority:    'Medium',
+    project:     '',
+    assignedTo:  '',
+    dueDate:     ''
   };
 
-  const [form,    setForm]    = useState(defaultForm);
-  const [loading, setLoading] = useState(false);
-  const [errors,  setErrors]  = useState({});
+  const [form,      setForm]      = useState(defaultForm);
+  const [loading,   setLoading]   = useState(false);
+  const [errors,    setErrors]    = useState({});
+  const [members,   setMembers]   = useState([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+
+  // ── Fetch members when project changes ───────────────────────────────────
+  useEffect(() => {
+    if (!form.project) {
+      setMembers([]);
+      return;
+    }
+    fetchProjectMembers(form.project);
+  }, [form.project]);
+
+  const fetchProjectMembers = async (projectId) => {
+    setMembersLoading(true);
+    try {
+      const res = await API.get(`/projects/${projectId}`);
+      const projectMembers = res.data.project.members.map(m => m.user);
+      setMembers(projectMembers);
+    } catch (err) {
+      setMembers([]);
+    } finally {
+      setMembersLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (editTask) {
@@ -167,21 +196,27 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
         status:      editTask.status      || 'Todo',
         priority:    editTask.priority    || 'Medium',
         project:     editTask.project?._id || editTask.project || '',
+        assignedTo:  editTask.assignedTo?._id
+                       || editTask.assignedTo
+                       || '',
         dueDate:     editTask.dueDate
           ? new Date(editTask.dueDate).toISOString().split('T')[0] : ''
       });
     } else {
-      setForm(defaultForm);
+      setForm({
+        ...defaultForm,
+        assignedTo: user?._id || ''   // default assign to self
+      });
     }
     setErrors({});
-  }, [editTask, isOpen]);
+  }, [editTask, isOpen, user]);
 
   if (!isOpen) return null;
 
   const validate = () => {
     const e = {};
-    if (!form.title.trim())  e.title   = 'Task title is required';
-    if (!form.project)       e.project = 'Please select a project';
+    if (!form.title.trim()) e.title   = 'Task title is required';
+    if (!form.project)      e.project = 'Please select a project';
     return e;
   };
 
@@ -191,12 +226,17 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
 
     setLoading(true);
     try {
+      const payload = {
+        ...form,
+        assignedTo: form.assignedTo || null
+      };
+
       if (isEdit) {
-        const res = await API.put(`/tasks/${editTask._id}`, form);
+        const res = await API.put(`/tasks/${editTask._id}`, payload);
         onSave(res.data.task, true);
         toast.success('Task updated!');
       } else {
-        const res = await API.post('/tasks', form);
+        const res = await API.post('/tasks', payload);
         onSave(res.data.task, false);
         toast.success('Task created!');
       }
@@ -208,12 +248,16 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
     }
   };
 
+  const getInitials = (name = '') =>
+    name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={e => e.stopPropagation()}>
 
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-dark-border">
+        <div className="flex items-center justify-between p-6
+                        border-b border-dark-border">
           <h2 className="text-lg font-bold text-text-primary">
             {isEdit ? 'Edit Task' : 'New Task'}
           </h2>
@@ -231,7 +275,8 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
 
           {/* Title */}
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1.5">
+            <label className="block text-sm font-medium
+                               text-text-secondary mb-1.5">
               Task Title <span className="text-red-400">*</span>
             </label>
             <input
@@ -253,7 +298,8 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1.5">
+            <label className="block text-sm font-medium
+                               text-text-secondary mb-1.5">
               Description
             </label>
             <textarea
@@ -267,13 +313,14 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
 
           {/* Project */}
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1.5">
+            <label className="block text-sm font-medium
+                               text-text-secondary mb-1.5">
               Project <span className="text-red-400">*</span>
             </label>
             <select
               value={form.project}
               onChange={e => {
-                setForm(p => ({ ...p, project: e.target.value }));
+                setForm(p => ({ ...p, project: e.target.value, assignedTo: '' }));
                 if (errors.project) setErrors(p => ({ ...p, project: '' }));
               }}
               className={`select ${errors.project ? 'border-red-500' : ''}`}
@@ -290,10 +337,113 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
             )}
           </div>
 
+          {/* ── Assign To ────────────────────────────────────────────────── */}
+          <div>
+            <label className="block text-sm font-medium
+                               text-text-secondary mb-1.5">
+              Assign To
+            </label>
+
+            {!form.project ? (
+              <div className="input text-text-muted text-sm
+                              flex items-center gap-2 cursor-not-allowed
+                              opacity-60">
+                <User className="w-4 h-4" />
+                Select a project first
+              </div>
+            ) : membersLoading ? (
+              <div className="input flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-primary
+                                border-t-transparent rounded-full animate-spin" />
+                <span className="text-text-muted text-sm">
+                  Loading members...
+                </span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {/* Unassigned option */}
+                <div
+                  onClick={() => setForm(p => ({ ...p, assignedTo: '' }))}
+                  className={`flex items-center gap-3 p-3 rounded-xl
+                              border cursor-pointer transition-all
+                              ${!form.assignedTo
+                                ? 'border-primary bg-primary bg-opacity-10'
+                                : 'border-dark-border hover:border-primary hover:border-opacity-40'
+                              }`}
+                >
+                  <div className="w-8 h-8 bg-dark-hover rounded-full
+                                  flex items-center justify-center
+                                  border-2 border-dashed border-dark-border">
+                    <User className="w-4 h-4 text-text-muted" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-text-secondary text-sm">Unassigned</p>
+                  </div>
+                  {!form.assignedTo && (
+                    <div className="w-4 h-4 bg-primary rounded-full
+                                    flex items-center justify-center">
+                      <span className="text-white text-xs">✓</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Member options */}
+                {members.map(member => (
+                  <div
+                    key={member._id}
+                    onClick={() => setForm(p => ({
+                      ...p,
+                      assignedTo: member._id
+                    }))}
+                    className={`flex items-center gap-3 p-3 rounded-xl
+                                border cursor-pointer transition-all
+                                ${form.assignedTo === member._id
+                                  ? 'border-primary bg-primary bg-opacity-10'
+                                  : 'border-dark-border hover:border-primary hover:border-opacity-40'
+                                }`}
+                  >
+                    {/* Avatar */}
+                    <div className="w-8 h-8 bg-primary rounded-full
+                                    flex items-center justify-center
+                                    text-white text-xs font-bold flex-shrink-0">
+                      {getInitials(member.name)}
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-text-primary text-sm font-medium
+                                    truncate">
+                        {member.name}
+                        {member._id === user?._id && (
+                          <span className="text-primary text-xs ml-1">
+                            (You)
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-text-muted text-xs truncate">
+                        {member.email}
+                      </p>
+                    </div>
+
+                    {/* Selected tick */}
+                    {form.assignedTo === member._id && (
+                      <div className="w-4 h-4 bg-primary rounded-full
+                                      flex items-center justify-center
+                                      flex-shrink-0">
+                        <span className="text-white text-xs">✓</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Status + Priority */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1.5">
+              <label className="block text-sm font-medium
+                                 text-text-secondary mb-1.5">
                 Status
               </label>
               <select
@@ -307,7 +457,8 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1.5">
+              <label className="block text-sm font-medium
+                                 text-text-secondary mb-1.5">
                 Priority
               </label>
               <select
@@ -324,7 +475,8 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
 
           {/* Due Date */}
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1.5">
+            <label className="block text-sm font-medium
+                               text-text-secondary mb-1.5">
               Due Date
             </label>
             <input
@@ -337,17 +489,22 @@ const TaskModal = ({ isOpen, onClose, onSave, editTask, projects }) => {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-6 border-t border-dark-border">
-          <button onClick={onClose} className="btn-secondary">Cancel</button>
+        <div className="flex items-center justify-end gap-3 p-6
+                        border-t border-dark-border">
+          <button onClick={onClose} className="btn-secondary">
+            Cancel
+          </button>
           <button
             onClick={handleSubmit}
             disabled={loading}
-            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-primary
+                       disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
               <>
                 <div className="w-4 h-4 border-2 border-white
-                                border-t-transparent rounded-full animate-spin" />
+                                border-t-transparent rounded-full
+                                animate-spin" />
                 Saving...
               </>
             ) : isEdit ? 'Save Changes' : 'Create Task'}
